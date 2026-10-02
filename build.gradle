@@ -107,6 +107,7 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
             minecraft_version      : minecraft_version,
             minecraft_version_range: minecraft_version_range,
             neo_version            : neo_version,
+            neo_version_range      : neo_version_range,
             mod_id                 : mod_id,
             mod_name               : mod_name,
             mod_license            : mod_license,
@@ -157,8 +158,16 @@ tasks.named('jar', Jar).configure {
 // branch that a dev run can never hit.
 def jarTask = tasks.named('jar', Jar)
 if (project.hasProperty('releaseJar')) {
+    // -PreleaseJarFile=<path> pins an artifact built against a different loader version, which is how a
+    // single jar gets proven on both the minimum supported NeoForge and the one we develop against.
+    // Without the pin, dependsOn(jar) would silently recompile for the current neo_version and the run
+    // would test an artifact nobody ships.
+    def pinnedJar = project.hasProperty('releaseJarFile') ? file(project.releaseJarFile.toString()) : null
+    def shippedJar = { pinnedJar ?: jarTask.get().archiveFile.get().asFile }
     tasks.named('runClient') {
-        dependsOn jarTask
+        if (pinnedJar == null) {
+            dependsOn jarTask
+        }
         doFirst {
             environment 'MOD_CLASSES', ''
             systemProperty 'fml.modFolders', ''
@@ -169,12 +178,12 @@ if (project.hasProperty('releaseJar')) {
             def survivors = classpath.files.findAll { devOutputs.contains(it.canonicalFile) }
             logger.lifecycle("[releaseJar] MOD_CLASSES=[" + environment['MOD_CLASSES'] + "]"
                     + " devOutputsOnClasspath=" + survivors.size() + survivors)
-            def shipped = jarTask.get().archiveFile.get().asFile
+            def shipped = shippedJar()
             copy { from shipped; into file('run/mods') }
             logger.lifecycle("[releaseJar] dev classpath removed; only run/mods/${shipped.name} provides the mod")
         }
         doLast {
-            delete file("run/mods/${jarTask.get().archiveFile.get().asFile.name}")
+            delete file("run/mods/${shippedJar().name}")
         }
     }
 } else {

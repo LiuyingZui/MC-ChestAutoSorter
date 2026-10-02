@@ -17,7 +17,7 @@
 | 项目 | 要求 | 说明 |
 | --- | --- | --- |
 | Minecraft | **26.3** | `mods.toml` 声明 `[26.3]` |
-| Mod 加载器 | **NeoForge 26.3.0.23-beta 或更高** | `mods.toml` 声明 `[26.3.0.23-beta,)` |
+| Mod 加载器 | **NeoForge 26.3.0.10-beta 或更高** | `mods.toml` 声明 `[26.3.0.10-beta,)`；已在 **26.3.0.10-beta** 与 **26.3.0.23-beta** 两个版本上跑过编译、GameTest 与客户端加载 |
 | Java | **25** | 26.3 由 Mojang 分发的运行时即为 Java 25 |
 | 游戏形态 | **单人游戏 / 局域网开放（集成服）** | ⚠️ **第一版明确不支持专用服务器**：请求会被服务端拒绝并提示「第一版不支持专用服务器」 |
 | 前置 Mod | 无 | 纯自有实现，不依赖 JEI 等 |
@@ -27,7 +27,7 @@
 1. 取到 `chestautosorter-0.1.0.jar`（本仓库 Release 附件，或自行 `./gradlew build` 产出 `build/libs/`）。
 2. 放进**你所用实例**的 `mods` 目录。注意版本隔离的启动器（如 PCL）：`mods` 在**版本文件夹内**，
    不是 `.minecraft\mods`；并且加载器只读 `mods` **根目录**，放进子文件夹（备份/分类目录）不会生效。
-3. 启动后在日志里应能看到 `[ChestAutoSorter] constructed on 26.3 / NeoForge 26.3.0.23-beta`
+3. 启动后在日志里应能看到 `[ChestAutoSorter] constructed on 26.3 / NeoForge <你实际加载器版本>`
    与 `payloads registered (sort_request -> server, sort_result -> client)`。
 
 ## 3. 怎么用

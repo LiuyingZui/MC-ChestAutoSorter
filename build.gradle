@@ -1,0 +1,194 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.147'
+}
+
+tasks.named('wrapper', Wrapper).configure {
+    distributionType = Wrapper.DistributionType.BIN
+}
+
+version = mod_version
+group = mod_group_id
+
+sourceSets.main.resources {
+    srcDir('src/generated/resources')
+    exclude("**/*.bbmodel")
+    exclude("src/generated/**/.cache")
+}
+
+repositories {
+}
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang ships Java 25 to end users in 26.3, so mods should target Java 25.
+java.toolchain.languageVersion = JavaLanguageVersion.of(25)
+
+neoForge {
+    version = project.neo_version
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            // Fixed, reusable entry point for the Stage C acceptance runs:
+            //   ./gradlew runClient                        -> normal client, no world auto-load
+            //   ./gradlew runClient -PquickPlayWorld=cas-test -> boots straight into that world
+            // Kept in the build file permanently so runs never depend on hand-edited arguments.
+            // programArgument only reaches the game when the property is supplied.
+            if (project.hasProperty('quickPlayWorld')) {
+                programArgument '--quickPlaySingleplayer'
+                programArgument project.property('quickPlayWorld')
+            }
+            //   ./gradlew runClient -PuiShot=<tag> -> the dev-only UiHarness drives the panel and
+            // writes run/screenshots/cas-*.png. No property, no behaviour change.
+            if (project.hasProperty('uiShot')) {
+                systemProperty 'cas.ui.shot', project.property('uiShot')
+            }
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        gameTestServer {
+            type = "gameTestServer"
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        data {
+            clientData()
+            programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// NOTE: Minecraft/NeoForge classes are intentionally NOT put on the JUnit classpath. NeoForge's
+// Bootstrap (FeatureFlags -> FeatureFlagLoader) requires a live FML loader, so any code touching
+// net.minecraft.* cannot run in plain JUnit here. Server-side classes are therefore covered by
+// GameTests (see src/main/java/com/chestautosorter/gametest), which run inside a real game.
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = true
+    }
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven {
+            url "file://${project.projectDir}/repo"
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// Development-only scaffolding must not ship: the gametest package and the UI screenshot harness are
+// dropped from the release jar. ChestAutoSorter registers gametests reflectively, so a missing
+// package is simply "no tests to run". Dev runs (runClient / runGameTestServer) load from the classes
+// directory and keep everything.
+tasks.named('jar', Jar).configure {
+    exclude 'com/chestautosorter/gametest/**'
+    exclude 'com/chestautosorter/client/UiHarness*'
+}
+
+// ./gradlew runClient -PreleaseJar — load the SHIPPED artifact instead of the dev class directories.
+// FML's InDevFolderLocator resolves dev coordinates as
+//   Optional.ofNullable(System.getenv("MOD_CLASSES")).orElse(System.getProperty("fml.modFolders", ""))
+// and returns immediately when that string isEmpty(), so an empty MOD_CLASSES turns dev discovery off;
+// the mod then comes only from ModsFolderLocator (run/mods), the same path a player's instance uses.
+// This is what proves the jar itself constructs, including the "gametest classes are not packaged"
+// branch that a dev run can never hit.
+def jarTask = tasks.named('jar', Jar)
+if (project.hasProperty('releaseJar')) {
+    tasks.named('runClient') {
+        dependsOn jarTask
+        doFirst {
+            environment 'MOD_CLASSES', ''
+            systemProperty 'fml.modFolders', ''
+            def devOutputs = [file('build/classes/java/main'), file('build/resources/main')].collect { it.canonicalFile }
+            classpath = classpath.filter { !devOutputs.contains(it.canonicalFile) }
+            // Prove the filter landed: if a dev output survives, parent-first classloading runs the
+            // class directory instead of the jar, and the run proves nothing about the shipped artifact.
+            def survivors = classpath.files.findAll { devOutputs.contains(it.canonicalFile) }
+            logger.lifecycle("[releaseJar] MOD_CLASSES=[" + environment['MOD_CLASSES'] + "]"
+                    + " devOutputsOnClasspath=" + survivors.size() + survivors)
+            def shipped = jarTask.get().archiveFile.get().asFile
+            copy { from shipped; into file('run/mods') }
+            logger.lifecycle("[releaseJar] dev classpath removed; only run/mods/${shipped.name} provides the mod")
+        }
+        doLast {
+            delete file("run/mods/${jarTask.get().archiveFile.get().asFile.name}")
+        }
+    }
+} else {
+    // A release run that crashed leaves its jar behind, and a dev run must never load a second copy
+    // of the mod alongside the class directory.
+    tasks.named('runClient') {
+        doFirst {
+            def stale = file('run/mods').listFiles()?.findAll {
+                it.name.startsWith("${mod_id}-") && it.name.endsWith('.jar')
+            } ?: []
+            stale.each {
+                logger.lifecycle("[runClient] removing leftover ${it.name} so the dev classes are the only source")
+                delete it
+            }
+        }
+    }
+}

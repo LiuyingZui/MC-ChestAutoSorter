@@ -1,0 +1,32 @@
+# ---- 构建产物与缓存 ----
+build/
+.gradle/
+out/
+bin/
+
+# ---- 开发客户端工作目录：存档、下载的资源、截图、运行日志 ----
+run/
+
+# ---- 本机留底：发布副本、取证日志、快照与 diff ----
+# 发布 jar 请通过 GitHub Release 附件分发，不进版本库
+release/
+reports/
+snapshots/
+logs/
+
+# ---- 本机 JDK（gradle.properties 里的 org.gradle.java.installations.paths 指向它）----
+.tools/
+
+# ---- 内部提示词/交接稿、本机开发留档，不属于公开仓库内容 ----
+# docs/ 里是个人机器的环境审计（路径、硬件、启动器布局）与逐阶段工作日志
+ChestAutoSorter_Inventory_UI_Agent_Prompt.md
+docs/
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
